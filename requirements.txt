@@ -1,0 +1,34 @@
+# Core dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+sqlalchemy>=2.0.0
+python-dotenv>=1.0.0
+
+# LLM and AI
+openai>=1.0.0
+langchain>=0.1.0
+langchain-openai>=0.0.2
+guidance>=0.0.9
+
+# Web interface
+streamlit>=1.30.0
+flask>=3.0.0
+
+# Data processing
+pyarrow>=14.0.0
+fastparquet>=2023.10.0
+
+# Testing and development
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.0.0
+pytest-cov>=4.0.0
+
+# Logging and monitoring
+wandb>=0.15.0
+python-json-logger>=2.0.0
+
+# Utilities
+tqdm>=4.65.0
+python-dateutil>=2.8.2
+pytz>=2023.3 
