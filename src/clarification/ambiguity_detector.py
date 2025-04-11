@@ -1,6 +1,6 @@
 from typing import List, Optional
-import openai
-from langchain.chat_models import ChatOpenAI
+import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import ChatPromptTemplate
 import os
 from dotenv import load_dotenv
@@ -9,10 +9,12 @@ load_dotenv()
 
 class AmbiguityDetector:
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model="gpt-4-turbo-preview",
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY")
+        # Configure Gemini
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        self.llm = ChatGoogleGenerativeAI(
+            model=os.getenv("MODEL_NAME", "gemini-2.0-flashlite"),
+            temperature=float(os.getenv("TEMPERATURE", "0.1")),
+            convert_system_message_to_human=True
         )
         
         self.prompt_template = ChatPromptTemplate.from_messages([
@@ -26,26 +28,23 @@ class AmbiguityDetector:
             - Vague metrics (e.g., "busy", "crowded")
             - Missing context about patient types or conditions
             
-            If you detect ambiguity, provide specific clarification questions that would help resolve it.
-            If the query is clear, return an empty list.
+            If you detect ambiguity, respond with "Clarification needed:" followed by numbered questions.
+            If the query is clear, respond with "No clarification needed."
             """),
             ("human", "{query}")
         ])
+        
+        self.chain = self.prompt_template | self.llm
     
     def detect_ambiguity(self, query: str) -> Optional[List[str]]:
         """Detect ambiguity in a query and return clarification questions if needed"""
-        response = self.llm.predict(
-            self.prompt_template.format_messages(query=query)[0].content
-        )
+        response = self.chain.invoke({"query": query})
         
         # Parse the response to extract clarification questions
-        # The LLM should return either an empty list or a list of questions
         try:
-            # The response should be in a format like:
-            # "Clarification needed:\n1. Which ICU unit are you referring to?\n2. What time period are you interested in?"
-            if "Clarification needed:" in response:
+            if "Clarification needed:" in response.content:
                 questions = []
-                for line in response.split("\n")[1:]:
+                for line in response.content.split("\n")[1:]:
                     if line.strip() and line[0].isdigit():
                         questions.append(line.split(". ", 1)[1])
                 return questions if questions else None

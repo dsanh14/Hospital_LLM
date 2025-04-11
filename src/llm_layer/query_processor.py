@@ -1,8 +1,7 @@
 from typing import Dict, Any
-import openai
-from langchain.chat_models import ChatOpenAI
+import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import ChatPromptTemplate
-from langchain.chains import LLMChain
 import os
 from dotenv import load_dotenv
 
@@ -15,10 +14,13 @@ class QueryProcessor:
     def __init__(self, data_manager: DataManager, ambiguity_detector: AmbiguityDetector):
         self.data_manager = data_manager
         self.ambiguity_detector = ambiguity_detector
-        self.llm = ChatOpenAI(
-            model="gpt-4-turbo-preview",
-            temperature=0,
-            api_key=os.getenv("OPENAI_API_KEY")
+        
+        # Configure Gemini
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        self.llm = ChatGoogleGenerativeAI(
+            model=os.getenv("MODEL_NAME", "gemini-2.0-flashlite"),
+            temperature=float(os.getenv("TEMPERATURE", "0.1")),
+            convert_system_message_to_human=True
         )
         
         # Load the schema for context
@@ -41,7 +43,7 @@ class QueryProcessor:
             ("human", "{query}")
         ])
         
-        self.chain = LLMChain(llm=self.llm, prompt=self.prompt_template)
+        self.chain = self.prompt_template | self.llm
     
     def process_query(self, query: str) -> Dict[str, Any]:
         """Process a natural language query and return the result"""
@@ -58,16 +60,16 @@ class QueryProcessor:
         schema_str = self._format_schema_for_prompt()
         
         # Process the query
-        response = self.chain.run(
-            query=query,
-            schema=schema_str
-        )
+        response = self.chain.invoke({
+            "schema": schema_str,
+            "query": query
+        })
         
         # Extract relevant data
         data = self._extract_relevant_data(query)
         
         return {
-            "answer": response,
+            "answer": response.content,
             "data": data,
             "explanation": "The answer is based on the current hospital operations data."
         }
