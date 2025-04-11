@@ -1,9 +1,9 @@
 from typing import Dict, Any
 import google.generativeai as genai
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.prompts import ChatPromptTemplate
 import os
 from dotenv import load_dotenv
+import pandas as pd
+from datetime import datetime, timedelta
 
 from data_layer.data_manager import DataManager
 from clarification.ambiguity_detector import AmbiguityDetector
@@ -15,35 +15,34 @@ class QueryProcessor:
         self.data_manager = data_manager
         self.ambiguity_detector = ambiguity_detector
         
-        # Configure Gemini
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        self.llm = ChatGoogleGenerativeAI(
-            model=os.getenv("MODEL_NAME", "gemini-2.0-flashlite"),
-            temperature=float(os.getenv("TEMPERATURE", "0.1")),
-            convert_system_message_to_human=True
-        )
+        # Configure Gemini with direct API key
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is not set")
+            
+        genai.configure(api_key=api_key)
+        
+        # Initialize the model
+        model_name = os.getenv("MODEL_NAME", "gemini-2.0-flash")
+        self.model = genai.GenerativeModel(model_name)
         
         # Load the schema for context
         self.schema = self.data_manager.get_schema()
         
         # Create the prompt template
-        self.prompt_template = ChatPromptTemplate.from_messages([
-            ("system", """You are a helpful assistant that answers questions about hospital operations data.
-            You have access to the following data tables and their schemas:
-            
-            {schema}
-            
-            When answering questions:
-            1. Be precise and factual
-            2. Include relevant numbers and statistics
-            3. Explain your reasoning
-            4. If the query is ambiguous, ask for clarification
-            5. Format your response in a clear, structured way
-            """),
-            ("human", "{query}")
-        ])
-        
-        self.chain = self.prompt_template | self.llm
+        self.system_prompt = """You are a helpful assistant that answers questions about hospital operations data.
+You have access to the following data tables and their schemas:
+
+{schema}
+
+When answering questions:
+1. Be precise and factual
+2. Include relevant numbers and statistics
+3. Explain your reasoning
+4. If the query is ambiguous, ask for clarification
+5. Format your response in a clear, structured way
+
+Based on the data available in the tables, provide a clear and concise answer."""
     
     def process_query(self, query: str) -> Dict[str, Any]:
         """Process a natural language query and return the result"""
@@ -56,20 +55,21 @@ class QueryProcessor:
                 "explanation": "The query contains ambiguous terms that need to be clarified."
             }
         
-        # Format the schema for the prompt
-        schema_str = self._format_schema_for_prompt()
-        
-        # Process the query
-        response = self.chain.invoke({
-            "schema": schema_str,
-            "query": query
-        })
-        
-        # Extract relevant data
+        # Get relevant data based on the query
         data = self._extract_relevant_data(query)
         
+        # Format the schema and data for the prompt
+        schema_str = self._format_schema_for_prompt()
+        data_str = self._format_data_for_prompt(data) if data is not None else "No relevant data found."
+        
+        # Create the full prompt
+        full_prompt = f"{self.system_prompt.format(schema=schema_str)}\n\nAvailable Data:\n{data_str}\n\nQuestion: {query}\nAnswer:"
+        
+        # Process the query
+        response = self.model.generate_content(full_prompt)
+        
         return {
-            "answer": response.content,
+            "answer": response.text,
             "data": data,
             "explanation": "The answer is based on the current hospital operations data."
         }
@@ -85,10 +85,52 @@ class QueryProcessor:
                 schema_str += f"  - {col_name} ({col_info['type']}): {col_info['description']}\n"
         return schema_str
     
-    def _extract_relevant_data(self, query: str) -> Any:
+    def _format_data_for_prompt(self, data: pd.DataFrame) -> str:
+        """Format DataFrame for inclusion in the prompt"""
+        if data is None or data.empty:
+            return "No data available."
+        return f"Data Preview:\n{data.head().to_string()}"
+    
+    def _extract_relevant_data(self, query: str) -> pd.DataFrame:
         """Extract relevant data based on the query"""
-        # This is a placeholder - actual implementation would:
-        # 1. Parse the query to determine which tables and columns are needed
-        # 2. Execute appropriate data queries
-        # 3. Return the relevant data
+        query = query.lower()
+        
+        # Handle census trends query
+        if "census" in query and "trend" in query and "last month" in query:
+            sql = """
+            SELECT date, unit_id, patient_count, admissions, discharges
+            FROM census
+            WHERE date >= date('now', '-30 days')
+            ORDER BY date DESC, unit_id
+            """
+            return self.data_manager.execute_query(sql)
+        
+        # Handle ICU occupancy query
+        if "icu" in query and ("occupancy" in query or "capacity" in query):
+            sql = """
+            SELECT unit_name,
+                   total_beds,
+                   occupied_beds,
+                   ROUND(CAST(occupied_beds AS FLOAT) / total_beds * 100, 1) as occupancy_rate
+            FROM icu_stats
+            WHERE timestamp >= datetime('now', '-1 day')
+            ORDER BY timestamp DESC
+            LIMIT 3
+            """
+            return self.data_manager.execute_query(sql)
+        
+        # Handle units at capacity query
+        if "capacity" in query or "full" in query:
+            sql = """
+            SELECT unit_name,
+                   total_beds,
+                   occupied_beds,
+                   ROUND(CAST(occupied_beds AS FLOAT) / total_beds * 100, 1) as occupancy_rate
+            FROM icu_stats
+            WHERE timestamp >= datetime('now', '-1 day')
+                AND (CAST(occupied_beds AS FLOAT) / total_beds) >= 0.9
+            ORDER BY occupancy_rate DESC
+            """
+            return self.data_manager.execute_query(sql)
+        
         return None 

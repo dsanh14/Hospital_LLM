@@ -1,18 +1,24 @@
 import pandas as pd
-import os
+import sqlite3
 from typing import Dict, Any, Optional
 import json
 from pathlib import Path
+import os
+from datetime import datetime, timedelta
+import numpy as np
 
 class DataManager:
     def __init__(self):
         self.data_dir = Path("data")
         self.schema_file = self.data_dir / "schema.json"
-        self.data_cache: Dict[str, pd.DataFrame] = {}
+        self.db_file = self.data_dir / "hospital.db"
         self.schema: Dict[str, Any] = {}
         
+        # Create data directory if it doesn't exist
+        os.makedirs(self.data_dir, exist_ok=True)
+        
         self._load_schema()
-        self._load_data()
+        self._initialize_database()
     
     def _load_schema(self) -> None:
         """Load the data schema from schema.json"""
@@ -26,21 +32,21 @@ class DataManager:
                     "icu_stats": {
                         "description": "ICU statistics including occupancy and capacity",
                         "columns": {
-                            "unit_id": {"type": "str", "description": "Unique identifier for the ICU unit"},
-                            "unit_name": {"type": "str", "description": "Name of the ICU unit"},
-                            "total_beds": {"type": "int", "description": "Total number of beds in the unit"},
-                            "occupied_beds": {"type": "int", "description": "Number of occupied beds"},
-                            "timestamp": {"type": "datetime", "description": "Time of the measurement"}
+                            "unit_id": {"type": "TEXT", "description": "Unique identifier for the ICU unit"},
+                            "unit_name": {"type": "TEXT", "description": "Name of the ICU unit"},
+                            "total_beds": {"type": "INTEGER", "description": "Total number of beds in the unit"},
+                            "occupied_beds": {"type": "INTEGER", "description": "Number of occupied beds"},
+                            "timestamp": {"type": "DATETIME", "description": "Time of the measurement"}
                         }
                     },
                     "census": {
                         "description": "Daily hospital census data",
                         "columns": {
-                            "date": {"type": "date", "description": "Date of the census"},
-                            "unit_id": {"type": "str", "description": "Unit identifier"},
-                            "patient_count": {"type": "int", "description": "Number of patients"},
-                            "admissions": {"type": "int", "description": "Number of new admissions"},
-                            "discharges": {"type": "int", "description": "Number of discharges"}
+                            "date": {"type": "DATE", "description": "Date of the census"},
+                            "unit_id": {"type": "TEXT", "description": "Unit identifier"},
+                            "patient_count": {"type": "INTEGER", "description": "Number of patients"},
+                            "admissions": {"type": "INTEGER", "description": "Number of new admissions"},
+                            "discharges": {"type": "INTEGER", "description": "Number of discharges"}
                         }
                     }
                 }
@@ -49,30 +55,89 @@ class DataManager:
     
     def _save_schema(self) -> None:
         """Save the current schema to schema.json"""
-        os.makedirs(self.data_dir, exist_ok=True)
         with open(self.schema_file, 'w') as f:
             json.dump(self.schema, f, indent=2)
     
-    def _load_data(self) -> None:
-        """Load all data files from the data directory"""
-        for table_name in self.schema["tables"]:
-            file_path = self.data_dir / f"{table_name}.csv"
-            if file_path.exists():
-                self.data_cache[table_name] = pd.read_csv(file_path)
+    def _initialize_database(self) -> None:
+        """Initialize SQLite database and create tables if they don't exist"""
+        with sqlite3.connect(self.db_file) as conn:
+            cursor = conn.cursor()
+            
+            # Create tables based on schema
+            for table_name, table_info in self.schema["tables"].items():
+                columns = []
+                for col_name, col_info in table_info["columns"].items():
+                    columns.append(f"{col_name} {col_info['type']}")
+                
+                create_table_sql = f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    {', '.join(columns)}
+                )
+                """
+                cursor.execute(create_table_sql)
+            
+            # Add sample data if tables are empty
+            self._add_sample_data(cursor)
+            
+            conn.commit()
     
-    def get_table(self, table_name: str) -> Optional[pd.DataFrame]:
-        """Get a specific table from the cache"""
-        return self.data_cache.get(table_name)
+    def _add_sample_data(self, cursor) -> None:
+        """Add sample data to the tables if they're empty"""
+        # Check if icu_stats is empty
+        cursor.execute("SELECT COUNT(*) FROM icu_stats")
+        if cursor.fetchone()[0] == 0:
+            # Add sample ICU data
+            icu_units = [
+                ("ICU1", "Medical ICU", 20),
+                ("ICU2", "Surgical ICU", 15),
+                ("ICU3", "Cardiac ICU", 10)
+            ]
+            
+            # Generate last 30 days of data
+            for unit_id, unit_name, total_beds in icu_units:
+                for days_ago in range(30):
+                    date = datetime.now() - timedelta(days=days_ago)
+                    occupied_beds = min(total_beds, int(np.random.normal(total_beds * 0.8, 2)))
+                    cursor.execute(
+                        "INSERT INTO icu_stats (unit_id, unit_name, total_beds, occupied_beds, timestamp) VALUES (?, ?, ?, ?, ?)",
+                        (unit_id, unit_name, total_beds, occupied_beds, date.strftime("%Y-%m-%d %H:%M:%S"))
+                    )
+        
+        # Check if census is empty
+        cursor.execute("SELECT COUNT(*) FROM census")
+        if cursor.fetchone()[0] == 0:
+            # Add sample census data
+            for days_ago in range(30):
+                date = datetime.now() - timedelta(days=days_ago)
+                for unit_id in ["ICU1", "ICU2", "ICU3"]:
+                    patient_count = np.random.randint(8, 20)
+                    admissions = np.random.randint(1, 5)
+                    discharges = np.random.randint(1, 5)
+                    cursor.execute(
+                        "INSERT INTO census (date, unit_id, patient_count, admissions, discharges) VALUES (?, ?, ?, ?, ?)",
+                        (date.strftime("%Y-%m-%d"), unit_id, patient_count, admissions, discharges)
+                    )
+    
+    def execute_query(self, query: str) -> pd.DataFrame:
+        """Execute a SQL query and return results as a pandas DataFrame"""
+        try:
+            with sqlite3.connect(self.db_file) as conn:
+                return pd.read_sql_query(query, conn)
+        except Exception as e:
+            print(f"Error executing query: {e}")
+            return pd.DataFrame()
     
     def get_schema(self) -> Dict[str, Any]:
         """Get the current schema"""
         return self.schema
     
-    def execute_query(self, query: str) -> pd.DataFrame:
-        """Execute a pandas query on the appropriate table"""
-        # This is a placeholder - actual implementation would parse the query
-        # and execute it on the appropriate table(s)
-        raise NotImplementedError("Query execution not yet implemented")
+    def get_table(self, table_name: str) -> Optional[pd.DataFrame]:
+        """Get a specific table as a pandas DataFrame"""
+        if table_name not in self.schema["tables"]:
+            return None
+        
+        query = f"SELECT * FROM {table_name}"
+        return self.execute_query(query)
     
     def add_data(self, table_name: str, data: pd.DataFrame) -> None:
         """Add new data to a table"""

@@ -1,0 +1,54 @@
+{
+  "tables": {
+    "icu_stats": {
+      "description": "ICU statistics including occupancy and capacity",
+      "columns": {
+        "unit_id": {
+          "type": "str",
+          "description": "Unique identifier for the ICU unit"
+        },
+        "unit_name": {
+          "type": "str",
+          "description": "Name of the ICU unit"
+        },
+        "total_beds": {
+          "type": "int",
+          "description": "Total number of beds in the unit"
+        },
+        "occupied_beds": {
+          "type": "int",
+          "description": "Number of occupied beds"
+        },
+        "timestamp": {
+          "type": "datetime",
+          "description": "Time of the measurement"
+        }
+      }
+    },
+    "census": {
+      "description": "Daily hospital census data",
+      "columns": {
+        "date": {
+          "type": "date",
+          "description": "Date of the census"
+        },
+        "unit_id": {
+          "type": "str",
+          "description": "Unit identifier"
+        },
+        "patient_count": {
+          "type": "int",
+          "description": "Number of patients"
+        },
+        "admissions": {
+          "type": "int",
+          "description": "Number of new admissions"
+        },
+        "discharges": {
+          "type": "int",
+          "description": "Number of discharges"
+        }
+      }
+    }
+  }
+}

@@ -28,35 +28,39 @@ def main():
     - "Which units are at capacity?"
     """)
     
-    # Initialize components
-    data_manager = DataManager()
-    ambiguity_detector = AmbiguityDetector()
-    query_processor = QueryProcessor(data_manager, ambiguity_detector)
-    
-    # User input
-    user_query = st.text_input("Enter your question:", placeholder="e.g., What's the current ICU occupancy rate?")
-    
-    if user_query:
-        try:
-            # Process query
-            with st.spinner("Processing your query..."):
-                result = query_processor.process_query(user_query)
-                
-                # Display results
-                st.subheader("Answer")
-                st.write(result['answer'])
-                
-                if result.get('explanation'):
-                    with st.expander("See explanation"):
-                        st.write(result['explanation'])
-                
-                if result.get('data'):
-                    st.subheader("Supporting Data")
-                    st.dataframe(result['data'])
+    try:
+        # Initialize components
+        data_manager = DataManager()
+        ambiguity_detector = AmbiguityDetector()
+        query_processor = QueryProcessor(data_manager, ambiguity_detector)
+        
+        # User input
+        user_query = st.text_input("Enter your question:", placeholder="e.g., What's the current ICU occupancy rate?")
+        
+        if user_query:
+            try:
+                # Process query
+                with st.spinner("Processing your query..."):
+                    result = query_processor.process_query(user_query)
                     
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
-            logger.error(f"Error processing query: {str(e)}", exc_info=True)
+                    # Display results
+                    st.subheader("Answer")
+                    st.write(result['answer'])
+                    
+                    if result.get('explanation'):
+                        with st.expander("See explanation"):
+                            st.write(result['explanation'])
+                    
+                    if result.get('data'):
+                        st.subheader("Supporting Data")
+                        st.dataframe(result['data'])
+                        
+            except Exception as e:
+                st.error(f"An error occurred while processing your query: {str(e)}")
+                logger.error(f"Error processing query: {str(e)}", exc_info=True)
+    except Exception as e:
+        st.error(f"Failed to initialize the application: {str(e)}")
+        logger.error(f"Application initialization error: {str(e)}", exc_info=True)
 
 if __name__ == "__main__":
     main() 
